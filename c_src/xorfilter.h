@@ -1,18 +1,3 @@
-/**
- * Copyright 2019 Daniel Lemire
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- * 
- *    http://www.apache.org/licenses/LICENSE-2.0
- * 
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- **/
 #ifndef XORFILTER_H
 #define XORFILTER_H
 #include <stdbool.h>
@@ -22,10 +7,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef XOR_SORT_ITERATIONS
+#define XOR_SORT_ITERATIONS 10 // after 10 iterations, we sort and remove duplicates
+#endif
+
 #ifndef XOR_MAX_ITERATIONS
 #define XOR_MAX_ITERATIONS 100 // probabillity of success should always be > 0.5 so 100 iterations is highly unlikely
 #endif
 
+
+static int xor_cmpfunc(const void * a, const void * b) {
+   return ( *(const uint64_t*)a - *(const uint64_t*)b );
+}
+
+static size_t xor_sort_and_remove_dup(uint64_t* keys, size_t length) {
+  qsort(keys, length, sizeof(uint64_t), xor_cmpfunc);
+  size_t j = 1;
+  for(size_t i = 1; i < length; i++) {
+    if(keys[i] != keys[i-1]) {
+      keys[j] = keys[i];
+      j++;
+    }
+  }
+  return j;
+}
 /**
  * We assume that you have a large set of 64-bit integers
  * and you want a data structure to do membership tests using
@@ -434,17 +439,12 @@ static inline uint32_t xor_flushone_decrement_buffer(xor_setbuffer_t *buffer,
   return bestslot;
 }
 
-//
-// construct the filter, returns true on success, false on failure.
-// most likely, a failure is due to too high a memory usage
-// size is the number of keys
-// The caller is responsible for calling xor8_allocate(size,filter) before.
-// The caller is responsible to ensure that there are no duplicated keys.
-// The inner loop will run up to XOR_MAX_ITERATIONS times (default on 100),
-// it should never fail, except if there are duplicated keys. If it fails,
-// a return value of false is provided.
-//
-bool xor8_buffered_populate(const uint64_t *keys, uint32_t size, xor8_t *filter) {
+// Construct the filter, returns true on success, false on failure.
+// The algorithm fails when there is insufficient memory.
+// The caller is responsable for calling xor8_allocate(size,filter)
+// before. For best performance, the caller should ensure that there are not too
+// many duplicated keys.
+static inline bool xor8_buffered_populate(uint64_t *keys, uint32_t size, xor8_t *filter) {
   if(size == 0) { return false; }
   uint64_t rng_counter = 1;
   filter->seed = xor_rng_splitmix64(&rng_counter);
@@ -490,8 +490,12 @@ bool xor8_buffered_populate(const uint64_t *keys, uint32_t size, xor8_t *filter)
 
   while (true) {
     iterations ++;
+    if(iterations == XOR_SORT_ITERATIONS) {
+      size = xor_sort_and_remove_dup(keys, size);
+    }
     if(iterations > XOR_MAX_ITERATIONS) {
-      fprintf(stderr, "Too many iterations. Are all your keys unique?");
+      // The probability of this happening is lower than the
+      // the cosmic-ray probability (i.e., a cosmic ray corrupts your system).
       xor_free_buffer(&buffer0);
       xor_free_buffer(&buffer1);
       xor_free_buffer(&buffer2);
@@ -646,17 +650,12 @@ bool xor8_buffered_populate(const uint64_t *keys, uint32_t size, xor8_t *filter)
   return true;
 }
 
-//
-// construct the filter, returns true on success, false on failure.
-// most likely, a failure is due to too high a memory usage
-// size is the number of keys
-// The caller is responsable for calling xor8_allocate(size,filter) before.
-// The caller is responsible to ensure that there are no duplicated keys.
-// The inner loop will run up to XOR_MAX_ITERATIONS times (default on 100),
-// it should never fail, except if there are duplicated keys. If it fails,
-// a return value of false is provided.
-//
-bool xor8_populate(const uint64_t *keys, uint32_t size, xor8_t *filter) {
+// Construct the filter, returns true on success, false on failure.
+// The algorithm fails when there is insufficient memory.
+// The caller is responsable for calling xor8_allocate(size,filter)
+// before. For best performance, the caller should ensure that there are not too
+// many duplicated keys.
+static inline bool xor8_populate(uint64_t *keys, uint32_t size, xor8_t *filter) {
   if(size == 0) { return false; }
   uint64_t rng_counter = 1;
   filter->seed = xor_rng_splitmix64(&rng_counter);
@@ -689,8 +688,12 @@ bool xor8_populate(const uint64_t *keys, uint32_t size, xor8_t *filter) {
 
   while (true) {
     iterations ++;
+    if(iterations == XOR_SORT_ITERATIONS) {
+      size = xor_sort_and_remove_dup(keys, size);
+    }
     if(iterations > XOR_MAX_ITERATIONS) {
-      fprintf(stderr, "Too many iterations. Are all your keys unique?");
+      // The probability of this happening is lower than the
+      // the cosmic-ray probability (i.e., a cosmic ray corrupts your system).
       free(sets);
       free(Q);
       free(stack);
@@ -854,17 +857,12 @@ bool xor8_populate(const uint64_t *keys, uint32_t size, xor8_t *filter) {
 }
 
 
-//
-// construct the filter, returns true on success, false on failure.
-// most likely, a failure is due to too high a memory usage
-// size is the number of keys
-// The caller is responsable for calling xor16_allocate(size,filter) before.
-// The caller is responsible to ensure that there are no duplicated keys.
-// The inner loop will run up to XOR_MAX_ITERATIONS times (default on 100),
-// it should never fail, except if there are duplicated keys. If it fails,
-// a return value of false is provided.
-//
-bool xor16_buffered_populate(const uint64_t *keys, uint32_t size, xor16_t *filter) {
+// Construct the filter, returns true on success, false on failure.
+// The algorithm fails when there is insufficient memory.
+// The caller is responsable for calling xor16_allocate(size,filter)
+// before. For best performance, the caller should ensure that there are not too
+// many duplicated keys.
+static inline bool xor16_buffered_populate(uint64_t *keys, uint32_t size, xor16_t *filter) {
   if(size == 0) { return false; }
   uint64_t rng_counter = 1;
   filter->seed = xor_rng_splitmix64(&rng_counter);
@@ -910,8 +908,12 @@ bool xor16_buffered_populate(const uint64_t *keys, uint32_t size, xor16_t *filte
 
   while (true) {
     iterations ++;
+    if(iterations == XOR_SORT_ITERATIONS) {
+      size = xor_sort_and_remove_dup(keys, size);
+    }
     if(iterations > XOR_MAX_ITERATIONS) {
-      fprintf(stderr, "Too many iterations. Are all your keys unique?");
+      // The probability of this happening is lower than the
+      // the cosmic-ray probability (i.e., a cosmic ray corrupts your system)é
       xor_free_buffer(&buffer0);
       xor_free_buffer(&buffer1);
       xor_free_buffer(&buffer2);
@@ -1069,17 +1071,12 @@ bool xor16_buffered_populate(const uint64_t *keys, uint32_t size, xor16_t *filte
 
 
 
-//
-// construct the filter, returns true on success, false on failure.
-// most likely, a failure is due to too high a memory usage
-// size is the number of keys
-// The caller is responsable for calling xor16_allocate(size,filter) before.
-// The caller is responsible to ensure that there are no duplicated keys.
-// The inner loop will run up to XOR_MAX_ITERATIONS times (default on 100),
-// it should never fail, except if there are duplicated keys. If it fails,
-// a return value of false is provided.
-//
-bool xor16_populate(const uint64_t *keys, uint32_t size, xor16_t *filter) {
+// Construct the filter, returns true on success, false on failure.
+// The algorithm fails when there is insufficient memory.
+// The caller is responsable for calling xor16_allocate(size,filter)
+// before. For best performance, the caller should ensure that there are not too
+// many duplicated keys.
+static inline bool xor16_populate(uint64_t *keys, uint32_t size, xor16_t *filter) {
   if(size == 0) { return false; }
   uint64_t rng_counter = 1;
   filter->seed = xor_rng_splitmix64(&rng_counter);
@@ -1113,8 +1110,12 @@ bool xor16_populate(const uint64_t *keys, uint32_t size, xor16_t *filter) {
 
   while (true) {
     iterations ++;
+    if(iterations == XOR_SORT_ITERATIONS) {
+      size = xor_sort_and_remove_dup(keys, size);
+    }
     if(iterations > XOR_MAX_ITERATIONS) {
-      fprintf(stderr, "Too many iterations. Are all your keys unique?");
+      // The probability of this happening is lower than the
+      // the cosmic-ray probability (i.e., a cosmic ray corrupts your system).
       free(sets);
       free(Q);
       free(stack);
@@ -1277,6 +1278,75 @@ bool xor16_populate(const uint64_t *keys, uint32_t size, xor16_t *filter) {
   return true;
 }
 
+
+static inline size_t xor16_serialization_bytes(xor16_t *filter) {
+  return sizeof(filter->seed) + sizeof(filter->blockLength) +
+        sizeof(uint16_t) * 3 * filter->blockLength;
+}
+
+static inline size_t xor8_serialization_bytes(const xor8_t *filter) {
+  return sizeof(filter->seed) + sizeof(filter->blockLength) +
+        sizeof(uint8_t) * 3 * filter->blockLength;
+}
+
+// serialize a filter to a buffer, the buffer should have a capacity of at least
+// xor16_serialization_bytes(filter) bytes.
+// Native endianess only.
+static inline void xor16_serialize(const xor16_t *filter, char *buffer) {
+  memcpy(buffer, &filter->seed, sizeof(filter->seed));
+  buffer += sizeof(filter->seed);
+  memcpy(buffer, &filter->blockLength, sizeof(filter->blockLength));
+  buffer += sizeof(filter->blockLength);
+  memcpy(buffer, filter->fingerprints, filter->blockLength * 3 * sizeof(uint16_t));
+}
+
+// serialize a filter to a buffer, the buffer should have a capacity of at least
+// xor8_serialization_bytes(filter) bytes.
+// Native endianess only.
+static inline void xor8_serialize(const xor8_t *filter, char *buffer) {
+  memcpy(buffer, &filter->seed, sizeof(filter->seed));
+  buffer += sizeof(filter->seed);
+  memcpy(buffer, &filter->blockLength, sizeof(filter->blockLength));
+  buffer += sizeof(filter->blockLength);
+  memcpy(buffer, filter->fingerprints, filter->blockLength * 3 * sizeof(uint8_t));
+}
+
+// deserialize a filter from a buffer, returns true on success, false on failure.
+// The output will be reallocated, so the caller should call xor16_free(filter) before
+// if the filter was already allocated. The caller needs to call xor16_free(filter) after.
+// The number of bytes read is xor16_serialization_bytes(filter).
+// Native endianess only.
+static inline bool xor16_deserialize(xor16_t * filter, const char *buffer) {
+  memcpy(&filter->seed, buffer, sizeof(filter->seed));
+  buffer += sizeof(filter->seed);
+  memcpy(&filter->blockLength, buffer, sizeof(filter->blockLength));
+  buffer += sizeof(filter->blockLength);
+  filter->fingerprints = (uint16_t*)malloc(filter->blockLength * 3 * sizeof(uint16_t));
+  if(filter->fingerprints == NULL) {
+    return false;
+  }
+  memcpy(filter->fingerprints, buffer, filter->blockLength * 3 * sizeof(uint16_t));
+  return true;
+}
+
+
+// deserialize a filter from a buffer, returns true on success, false on failure.
+// The output will be reallocated, so the caller should call xor8_free(filter) before
+// if the filter was already allocated. The caller needs to call xor8_free(filter) after.
+// The number of bytes read is xor8_serialization_bytes(filter).
+// Native endianess only.
+static inline bool xor8_deserialize(xor8_t * filter, const char *buffer) {
+  memcpy(&filter->seed, buffer, sizeof(filter->seed));
+  buffer += sizeof(filter->seed);
+  memcpy(&filter->blockLength, buffer, sizeof(filter->blockLength));
+  buffer += sizeof(filter->blockLength);
+  filter->fingerprints = (uint8_t*)malloc(filter->blockLength * 3 * sizeof(uint8_t));
+  if(filter->fingerprints == NULL) {
+    return false;
+  }
+  memcpy(filter->fingerprints, buffer, filter->blockLength * 3 * sizeof(uint8_t));
+  return true;
+}
 
 
 #endif
